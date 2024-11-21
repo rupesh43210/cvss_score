@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVSS Threat Analysis</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-8">CVSS Threat Analysis</h1>
+        
+        <!-- File Upload Section -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Upload Threats File</h2>
+            <div class="flex flex-col space-y-4">
+                <!-- Model Selection -->
+                <div v-if="models.length > 0">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Select AI Model</label>
+                    <select v-model="selectedModel" @change="setModel" class="w-full p-2 border rounded">
+                        <option v-for="model in models" :key="model">{% raw %}{{ model }}{% endraw %}</option>
+                    </select>
+                </div>
+
+                <!-- File Input -->
+                <div class="flex items-center justify-center w-full">
+                    <label class="w-full flex flex-col items-center px-4 py-6 bg-white rounded-lg shadow-lg tracking-wide border border-blue cursor-pointer hover:bg-blue-50">
+                        <svg class="w-8 h-8 text-blue-500" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                            <path d="M16.88 9.1A4 4 0 0 1 16 17H5a5 5 0 0 1-1-9.9V7a3 3 0 0 1 4.52-2.59A4.98 4.98 0 0 1 17 8c0 .38-.04.74-.12 1.1zM11 11h3l-4-4-4 4h3v3h2v-3z" />
+                        </svg>
+                        <span class="mt-2 text-base leading-normal">Select a file</span>
+                        <input type='file' class="hidden" @change="handleFileUpload" accept=".xlsx,.xls,.csv" />
+                    </label>
+                </div>
+
+                <!-- Upload Button -->
+                <button @click="uploadAndAnalyze" :disabled="!selectedFile" 
+                    class="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                    Upload and Analyze
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div v-if="loading" class="text-center py-4">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+            <p class="mt-2 text-gray-600">Analyzing threats...</p>
+        </div>
+
+        <!-- Error Message -->
+        <div v-if="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
+            <span class="block sm:inline">{% raw %}{{ error }}{% endraw %}</span>
+        </div>
+
+        <!-- Results Section -->
+        <div v-if="results.length > 0" class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">Analysis Results</h2>
+                <button @click="downloadResults" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                    Download Excel Report
+                </button>
+            </div>
+
+            <!-- Results Table -->
+            <div class="overflow-x-auto">
+                <table class="min-w-full table-auto">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CVSS Score</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Severity</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vector</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Justification</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        <tr v-for="result in results" :key="result.description">
+                            <td class="px-6 py-4 whitespace-normal">{% raw %}{{ result.description }}{% endraw %}</td>
+                            <td class="px-6 py-4">{% raw %}{{ result.cvss_score }}{% endraw %}</td>
+                            <td class="px-6 py-4">
+                                <span :class="getSeverityClass(result.severity)">
+                                    {% raw %}{{ result.severity }}{% endraw %}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4">
+                                <span class="text-sm">
+                                    AV:{% raw %}{{ result.metrics.AV }}{% endraw %}/AC:{% raw %}{{ result.metrics.AC }}{% endraw %}/PR:{% raw %}{{ result.metrics.PR }}{% endraw %}/UI:{% raw %}{{ result.metrics.UI }}{% endraw %}/S:{% raw %}{{ result.metrics.S }}{% endraw %}/C:{% raw %}{{ result.metrics.C }}{% endraw %}/I:{% raw %}{{ result.metrics.I }}{% endraw %}/A:{% raw %}{{ result.metrics.A }}{% endraw %}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-normal text-sm">
+                                <div class="text-gray-900">{% raw %}{{ result.metrics.justification }}{% endraw %}</div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue
+
+        createApp({
+            data() {
+                return {
+                    selectedFile: null,
+                    results: [],
+                    error: null,
+                    loading: false,
+                    models: [],
+                    selectedModel: null,
+                    outputFile: null,
+                    uploadedFilename: null
+                }
+            },
+            async mounted() {
+                try {
+                    const response = await fetch('/models')
+                    const data = await response.json()
+                    this.models = data.models
+                    if (this.models.length > 0) {
+                        this.selectedModel = this.models[0]
+                    }
+                } catch (error) {
+                    console.error('Error fetching models:', error)
+                }
+            },
+            methods: {
+                handleFileUpload(event) {
+                    this.selectedFile = event.target.files[0]
+                    this.error = null
+                },
+                async setModel() {
+                    try {
+                        const response = await fetch('/model', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ model: this.selectedModel }),
+                        })
+                        if (!response.ok) {
+                            throw new Error('Failed to set model')
+                        }
+                    } catch (error) {
+                        this.error = 'Failed to set model'
+                        console.error('Error:', error)
+                    }
+                },
+                async uploadAndAnalyze() {
+                    if (!this.selectedFile) return
+
+                    this.loading = true
+                    this.error = null
+                    this.results = []
+                    this.outputFile = null
+
+                    try {
+                        // Step 1: Upload the file
+                        const formData = new FormData()
+                        formData.append('file', this.selectedFile)
+
+                        const uploadResponse = await fetch('/upload', {
+                            method: 'POST',
+                            body: formData
+                        })
+
+                        if (!uploadResponse.ok) {
+                            const errorData = await uploadResponse.json()
+                            throw new Error(errorData.error || 'Upload failed')
+                        }
+
+                        const uploadData = await uploadResponse.json()
+                        this.uploadedFilename = uploadData.filename
+
+                        // Step 2: Analyze the file
+                        const analyzeResponse = await fetch('/analyze', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                filename: this.uploadedFilename
+                            })
+                        })
+
+                        if (!analyzeResponse.ok) {
+                            const errorData = await analyzeResponse.json()
+                            throw new Error(errorData.error || 'Analysis failed')
+                        }
+
+                        const analyzeData = await analyzeResponse.json()
+                        this.results = analyzeData.results
+                        this.outputFile = analyzeData.output_file
+
+                        // Reset file input
+                        this.selectedFile = null
+                        const fileInput = document.querySelector('input[type="file"]')
+                        if (fileInput) fileInput.value = ''
+
+                    } catch (error) {
+                        this.error = error.message || 'An error occurred'
+                        console.error('Error:', error)
+                    } finally {
+                        this.loading = false
+                    }
+                },
+                async downloadResults() {
+                    if (!this.outputFile) {
+                        this.error = 'No output file available'
+                        return
+                    }
+
+                    try {
+                        const response = await fetch(`/download/${this.outputFile}`)
+                        if (!response.ok) {
+                            const errorData = await response.json()
+                            throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
+                        }
+
+                        const blob = await response.blob()
+                        const url = window.URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = this.outputFile
+                        document.body.appendChild(a)
+                        a.click()
+                        window.URL.revokeObjectURL(url)
+                        document.body.removeChild(a)
+                    } catch (error) {
+                        this.error = error.message || 'Failed to download results'
+                        console.error('Download error:', error)
+                    }
+                },
+                getSeverityClass(severity) {
+                    const classes = 'px-2 py-1 rounded text-white text-sm font-medium'
+                    switch (severity.toLowerCase()) {
+                        case 'critical':
+                            return `${classes} bg-red-600`
+                        case 'high':
+                            return `${classes} bg-red-500`
+                        case 'medium':
+                            return `${classes} bg-yellow-500`
+                        case 'low':
+                            return `${classes} bg-green-500`
+                        default:
+                            return `${classes} bg-gray-500`
+                    }
+                }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html>
